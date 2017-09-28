@@ -26,13 +26,11 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import net.pms.PMS;
 import net.pms.configuration.PmsConfiguration;
-import net.pms.configuration.RendererConfiguration;
 import net.pms.encoders.Player;
 import net.pms.formats.Format;
 import net.pms.formats.FormatFactory;
 import net.pms.io.OutputParams;
 import net.pms.util.FileUtil;
-import net.pms.util.FullyPlayed;
 import net.pms.util.ProcessUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,19 +38,15 @@ import org.slf4j.LoggerFactory;
 public class RealFile extends MapFile {
 	private static final Logger LOGGER = LoggerFactory.getLogger(RealFile.class);
 
-	private boolean useSuperThumb;
-
 	public RealFile(File file) {
 		getConf().getFiles().add(file);
 		setLastModified(file.lastModified());
-		useSuperThumb = false;
 	}
 
 	public RealFile(File file, String name) {
 		getConf().getFiles().add(file);
 		getConf().setName(name);
 		setLastModified(file.lastModified());
-		useSuperThumb = false;
 	}
 
 	@Override
@@ -255,9 +249,6 @@ public class RealFile extends MapFile {
 
 	@Override
 	public DLNAThumbnailInputStream getThumbnailInputStream() throws IOException {
-		if (useSuperThumb) {
-			return super.getThumbnailInputStream();
-		}
 
 		File file = getFile();
 		File cachedThumbnail = null;
@@ -335,13 +326,13 @@ public class RealFile extends MapFile {
 		return getName() + ">" + getFile().getAbsolutePath();
 	}
 
-	public void ignoreThumbHandling() {
-		useSuperThumb = true;
-	}
-
+	@SuppressWarnings("deprecation")
 	@Override
-	protected String getDisplayNameBase(RendererConfiguration renderer, PmsConfiguration configuration) {
-		String displayName = super.getDisplayNameBase(renderer, configuration);
+	protected String getDisplayNameBase(PmsConfiguration configuration) {
+		if (parent instanceof SubSelFile && media_subtitle instanceof DLNAMediaOpenSubtitle) {
+			return ((DLNAMediaOpenSubtitle) media_subtitle).getName();
+		}
+		String displayName = super.getDisplayNameBase(configuration);
 		if (isFolder()) {
 			return displayName;
 		}
@@ -350,7 +341,6 @@ public class RealFile extends MapFile {
 		} else if (configuration.isHideExtensions()) {
 			displayName = FileUtil.getFileNameWithoutExtension(displayName);
 		}
-		displayName = FullyPlayed.prefixDisplayName(displayName, this, renderer);
 
 		return displayName;
 	}

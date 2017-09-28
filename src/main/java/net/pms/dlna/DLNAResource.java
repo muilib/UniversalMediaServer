@@ -714,7 +714,10 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 								// folder if supported/enabled and if it doesn't already exist
 								VirtualFolder transcodeFolder = getTranscodeFolder(true);
 								if (transcodeFolder != null) {
-									VirtualFolder fileTranscodeFolder = new FileTranscodeVirtualFolder(child.getDisplayName(), null);
+									VirtualFolder fileTranscodeFolder = new FileTranscodeVirtualFolder(child);
+									if (parent instanceof SubSelect) {
+										fileTranscodeFolder.setMediaSubtitle(child.getMediaSubtitle());
+									}
 
 									DLNAResource newChild = child.clone();
 									newChild.player = playerTranscoding;
@@ -722,7 +725,8 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 									fileTranscodeFolder.addChildInternal(newChild);
 									LOGGER.trace("Adding \"{}\" to transcode folder for player: \"{}\"", child.getName(), playerTranscoding);
 
-									transcodeFolder.updateChild(fileTranscodeFolder);
+									transcodeFolder.addChildInternal(fileTranscodeFolder);
+									//transcodeFolder.updateChild(fileTranscodeFolder); //TODO: (Nad) Test
 								}
 							}
 
@@ -1594,12 +1598,11 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 	 * none should be displayed. The "base" name is the name of this
 	 * {@link DLNAResource} without any prefix or suffix.
 	 *
-	 * @param renderer the {@link RendererConfiguration} to use.
 	 * @param configuration the {@link PmsConfiguration} to use.
 	 * @return The base display name or {@code ""}.
 	 */
 	@SuppressWarnings("unused")
-	protected String getDisplayNameBase(RendererConfiguration renderer, PmsConfiguration configuration) {
+	protected String getDisplayNameBase(PmsConfiguration configuration) {
 		// this unescape trick is to solve the problem of a name containing
 		// unicode stuff like \u005e
 		// if it's done here it will fix this for all objects
@@ -1754,7 +1757,7 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 				DURATION_TIME_FORMAT)
 			);
 		} else {
-			sb.append(getDisplayNameBase(mediaRenderer, configurationSpecificToRenderer));
+			sb.append(getDisplayNameBase(configurationSpecificToRenderer));
 		}
 
 		// Suffix
@@ -1801,7 +1804,7 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 			} else if (configurationSpecificToRenderer.isHideExtensions()) {
 				displayName = FileUtil.getFileNameWithoutExtension(displayName);
 			}
-			displayName = FullyPlayed.prefixDisplayName(displayName, rf, mediaRenderer);
+//			displayName = FullyPlayed.prefixDisplayName(displayName, rf, mediaRenderer);
 		}
 
 		if (player != null) {
@@ -1986,7 +1989,7 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 		sb.append(getResourceId()); //id
 		sb.append('/');
 		sb.append("subtitle0000");
-		sb.append(encode(subs.getExternalFile().getName()));
+		sb.append(encode(subs.getName()));
 		return sb.toString();
 	}
 
@@ -2183,7 +2186,7 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 								)
 							)
 						) {
-							/**
+							/*
 							 * Media renderer needs ORG_PN to be accurate.
 							 * If the value does not match the media, it won't play the media.
 							 * Often we can lazily predict the correct value to send, but due to
@@ -2199,274 +2202,15 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 							 * This code block comes from Player.setAudioAndSubs()
 							 */
 							if (mediaRenderer.isAccurateDLNAOrgPN()) {
-								boolean finishedMatchingPreferences = false;
 								OutputParams params = new OutputParams(configurationSpecificToRenderer);
-								if (params.aid == null && media != null && media.getFirstAudioTrack() != null) {
-									// check for preferred audio
-									DLNAMediaAudio dtsTrack = null;
-									StringTokenizer st = new StringTokenizer(configurationSpecificToRenderer.getAudioLanguages(), ",");
-									while (st.hasMoreTokens()) {
-										String lang = st.nextToken().trim();
-										LOGGER.trace("Looking for an audio track with lang: " + lang);
-										for (DLNAMediaAudio audio : media.getAudioTracksList()) {
-											if (audio.matchCode(lang)) {
-												params.aid = audio;
-												LOGGER.trace("Matched audio track: " + audio);
-												break;
-											}
-
-											if (dtsTrack == null && audio.isDTS()) {
-												dtsTrack = audio;
-											}
-										}
-									}
-
-									// preferred audio not found, take a default audio track, dts first if available
-									if (dtsTrack != null) {
-										params.aid = dtsTrack;
-										LOGGER.trace("Found priority audio track with DTS: " + dtsTrack);
-									} else {
-										params.aid = media.getAudioTracksList().get(0);
-										LOGGER.trace("Chose a default audio track: " + params.aid);
-									}
-								}
-
-								String currentLang = null;
-								DLNAMediaSubtitle matchedSub = null;
-								if (params.aid != null) {
-									currentLang = params.aid.getLang();
-								}
-
-								if (params.sid != null && params.sid.getId() == -1) {
-									LOGGER.trace("Don't want subtitles!");
-									params.sid = null;
-									media_subtitle = params.sid;
-									finishedMatchingPreferences = true;
-								}
-
-								/**
-								 * Check for live subtitles
-								 */
-								if (!finishedMatchingPreferences && params.sid != null && !StringUtils.isEmpty(params.sid.getLiveSubURL())) {
-									LOGGER.debug("Live subtitles " + params.sid.getLiveSubURL());
-									try {
-										matchedSub = params.sid;
-										String file = OpenSubtitle.fetchSubs(matchedSub.getLiveSubURL(), matchedSub.getLiveSubFile());
-										if (!StringUtils.isEmpty(file)) {
-											matchedSub.setExternalFile(new File(file), true);
-											params.sid = matchedSub;
-											media_subtitle = params.sid;
-											finishedMatchingPreferences = true;
-										}
-									} catch (IOException e) {
-									}
-								}
-
-								if (!finishedMatchingPreferences) {
-									StringTokenizer st = new StringTokenizer(configurationSpecificToRenderer.getAudioSubLanguages(), ";");
-
-									/**
-									 * Check for external and internal subtitles matching the user's language
-									 * preferences
-									 */
-									boolean matchedInternalSubtitles = false;
-									boolean matchedExternalSubtitles = false;
-									while (st.hasMoreTokens()) {
-										String pair = st.nextToken();
-										if (pair.contains(",")) {
-											String audio = pair.substring(0, pair.indexOf(','));
-											String sub = pair.substring(pair.indexOf(',') + 1);
-											audio = audio.trim();
-											sub = sub.trim();
-											if (currentLang != null && LOGGER.isTraceEnabled()) {
-												LOGGER.trace("Searching for a match for language \"{}\" with audio \"{}\" and subtitle \"{}\"", currentLang, audio, sub);
-											}
-
-											if (Iso639.isCodesMatching(audio, currentLang) || (currentLang != null && audio.equals("*"))) {
-												if (sub.equals("off")) {
-													/**
-													 * Ignore the "off" language for external subtitles if the user setting is enabled
-													 * TODO: Prioritize multiple external subtitles properly instead of just taking the first one we load
-													 */
-													if (configurationSpecificToRenderer.isForceExternalSubtitles()) {
-														for (DLNAMediaSubtitle present_sub : media.getSubtitleTracksList()) {
-															if (present_sub.getExternalFile() != null) {
-																matchedSub = present_sub;
-																matchedExternalSubtitles = true;
-																LOGGER.trace("Ignoring the \"off\" language because there are external subtitles");
-																break;
-															}
-														}
-													}
-
-													if (!matchedExternalSubtitles) {
-														matchedSub = new DLNAMediaSubtitle();
-														matchedSub.setLang("off");
-													}
-												} else if (getMedia() != null) {
-													for (DLNAMediaSubtitle present_sub : media.getSubtitleTracksList()) {
-														if (present_sub.matchCode(sub) || sub.equals("*")) {
-															if (present_sub.getExternalFile() != null) {
-																if (configurationSpecificToRenderer.isAutoloadExternalSubtitles()) {
-																	// Subtitle is external and we want external subtitles, look no further
-																	matchedSub = present_sub;
-																	LOGGER.trace("Matched external subtitles track: {}", matchedSub);
-																	break;
-																}
-																// Subtitle is external but we do not want external subtitles, keep searching
-																LOGGER.trace("External subtitles ignored because of user setting: {}", present_sub);
-															} else if (!matchedInternalSubtitles) {
-																matchedSub = present_sub;
-																LOGGER.trace("Matched internal subtitles track: {}", matchedSub);
-																if (configurationSpecificToRenderer.isAutoloadExternalSubtitles()) {
-																	// Subtitle is internal and we will wait to see if an external one is available instead
-																	matchedInternalSubtitles = true;
-																} else {
-																	// Subtitle is internal and we will use it
-																	break;
-																}
-															}
-														}
-													}
-												}
-
-												if (matchedSub != null && !matchedInternalSubtitles) {
-													break;
-												}
-											}
-										}
-									}
-
-									/**
-									 * Check for external subtitles that were skipped in the above code block
-									 * because they didn't match language preferences, if there wasn't already
-									 * a match and the user settings specify it.
-									 */
-									if (matchedSub == null && configurationSpecificToRenderer.isForceExternalSubtitles()) {
-										for (DLNAMediaSubtitle present_sub : media.getSubtitleTracksList()) {
-											if (present_sub.getExternalFile() != null) {
-												matchedSub = present_sub;
-												LOGGER.trace("Matched external subtitles track that did not match language preferences: " + matchedSub);
-												break;
-											}
-										}
-									}
-
-									/**
-									 * Disable chosen subtitles if the user has disabled all subtitles or
-									 * if the language preferences have specified the "off" language.
-									 *
-									 * TODO: Can't we save a bunch of looping by checking for isDisableSubtitles
-									 * just after the Live Subtitles check above?
-									 */
-									if (matchedSub != null && params.sid == null) {
-										if (configurationSpecificToRenderer.isDisableSubtitles() || (matchedSub.getLang() != null && matchedSub.getLang().equals("off"))) {
-											LOGGER.trace("Disabled the subtitles: " + matchedSub);
-										} else {
-											if (mediaRenderer.isExternalSubtitlesFormatSupported(matchedSub, media)) {
-												matchedSub.setSubsStreamable(true);
-											}
-											params.sid = matchedSub;
-											media_subtitle = params.sid;
-										}
-									}
-
-									/**
-									 * Check for forced subtitles.
-									 */
-									if (!configurationSpecificToRenderer.isDisableSubtitles() && params.sid == null && media != null) {
-										// Check for subtitles again
-										File video = new File(getSystemName());
-										FileUtil.isExternalSubtitlesExists(video, media, false);
-
-										if (configurationSpecificToRenderer.isAutoloadExternalSubtitles()) {
-											boolean forcedSubsFound = false;
-											// Priority to external subtitles
-											for (DLNAMediaSubtitle sub : media.getSubtitleTracksList()) {
-												if (matchedSub != null && matchedSub.getLang() != null && matchedSub.getLang().equals("off")) {
-													st = new StringTokenizer(configurationSpecificToRenderer.getForcedSubtitleTags(), ",");
-
-													while (sub.getSubtitlesTrackTitleFromMetadata() != null && st.hasMoreTokens()) {
-														String forcedTags = st.nextToken();
-														forcedTags = forcedTags.trim();
-														if (
-															sub.getSubtitlesTrackTitleFromMetadata().toLowerCase().contains(forcedTags) &&
-															Iso639.isCodesMatching(sub.getLang(), configurationSpecificToRenderer.getForcedSubtitleLanguage())
-														) {
-															LOGGER.trace("Forcing preferred subtitles: " + sub.getLang() + "/" + sub.getSubtitlesTrackTitleFromMetadata());
-															LOGGER.trace("Forced subtitles track: " + sub);
-
-															if (sub.getExternalFile() != null) {
-																LOGGER.trace("Found external forced file: " + sub.getExternalFile().getAbsolutePath());
-															}
-
-															if (mediaRenderer.isExternalSubtitlesFormatSupported(sub, media)) {
-																sub.setSubsStreamable(true);
-															}
-															params.sid = sub;
-															media_subtitle = params.sid;
-															forcedSubsFound = true;
-															break;
-														}
-													}
-
-													if (forcedSubsFound == true) {
-														break;
-													}
-												} else {
-													LOGGER.trace("Found subtitles track: " + sub);
-													if (sub.getExternalFile() != null) {
-														LOGGER.trace("Found external file: " + sub.getExternalFile().getAbsolutePath());
-														if (mediaRenderer.isExternalSubtitlesFormatSupported(sub, media)) {
-															sub.setSubsStreamable(true);
-														}
-														params.sid = sub;
-														media_subtitle = params.sid;
-														break;
-													}
-												}
-											}
-										}
-
-										if (
-											matchedSub != null &&
-											matchedSub.getLang() != null &&
-											matchedSub.getLang().equals("off")
-										) {
-											finishedMatchingPreferences = true;
-										}
-
-										if (!finishedMatchingPreferences && params.sid == null) {
-											st = new StringTokenizer(UMSUtils.getLangList(params.mediaRenderer), ",");
-											while (st.hasMoreTokens()) {
-												String lang = st.nextToken();
-												lang = lang.trim();
-												LOGGER.trace("Looking for a subtitle track with lang: " + lang);
-												for (DLNAMediaSubtitle sub : media.getSubtitleTracksList()) {
-													if (
-														sub.matchCode(lang) &&
-														!(
-															!configurationSpecificToRenderer.isAutoloadExternalSubtitles() &&
-															sub.getExternalFile() != null
-														)
-													) {
-														if (mediaRenderer.isExternalSubtitlesFormatSupported(sub, media)) {
-															sub.setSubsStreamable(true);
-														}
-														params.sid = sub;
-														LOGGER.trace("Matched subtitles track: " + params.sid);
-														break;
-													}
-												}
-											}
-										}
-									}
-								}
+								params.mediaRenderer = mediaRenderer; //TODO: (Nad) Verify right calls/logic
+								Player.setAudioAndSubs(getFileName(), media, params);
+								media_subtitle = params.sid;
 
 								if (media_subtitle == null) {
-									LOGGER.trace("We do not want a subtitle for " + getName());
+									LOGGER.trace("We do not want a subtitle for {}", getName());
 								} else {
-									LOGGER.trace("We do want a subtitle for " + getName());
+									LOGGER.trace("We do want a subtitle for {}", getName());
 								}
 							}
 
@@ -2606,9 +2350,9 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 					media_subtitle.isStreamable()
 				) {
 					subsAreValidForStreaming = true;
-					LOGGER.trace("Setting subsAreValidForStreaming to true for " + media_subtitle.getExternalFile().getName());
+					LOGGER.trace("Setting subsAreValidForStreaming to true for \"{}\"", media_subtitle.getName());
 				} else {
-					LOGGER.trace("Not setting subsAreValidForStreaming and it is false for " + getName());
+					LOGGER.trace("Not setting subsAreValidForStreaming and it is false for \"{}\"", getName());
 				}
 			}
 
@@ -2649,7 +2393,7 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 		StringBuilder wireshark = new StringBuilder();
 		final DLNAMediaAudio firstAudioTrack = media != null ? media.getFirstAudioTrack() : null;
 
-		/**
+		/*
 		 * Use the track title for audio files, otherwise use the filename.
 		 */
 		String title;
@@ -2659,8 +2403,13 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 			StringUtils.isNotBlank(firstAudioTrack.getSongname())
 		) {
 			title = firstAudioTrack.getSongname();
-		} else { // Ditlew - org
-			title = (isFolder || subsAreValidForStreaming) ? getDisplayName(mediaRenderer, false) : mediaRenderer.getUseSameExtension(getDisplayName(mediaRenderer, false));
+		} else if (isFolder || subsAreValidForStreaming) {
+			title = getDisplayName(mediaRenderer, false);
+		} else {
+			title = mediaRenderer.getUseSameExtension(getDisplayName(mediaRenderer, false));
+		}
+		if (!mediaRenderer.isThumbnails() && this instanceof RealFile && FullyPlayed.isFullyPlayedMark(((RealFile) this).getFile())) {
+			title = FullyPlayed.addFullyPlayedNamePrefix(title, this);
 		}
 
 		title = resumeStr(title);
@@ -3421,8 +3170,12 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 									} catch (NullPointerException e) { }
 
 									if (!quietPlay()) {
-										LOGGER.info("Stopped playing " + getName() + " on your " + rendererName);
-										LOGGER.debug("The full filename of which is: " + getSystemName() + " and the address of the renderer is: " + rendererId);
+										LOGGER.info("Stopped playing {} on {}", getName(), rendererName);
+										LOGGER.debug(
+											"The full filename of which is \"{}\" and the address of the renderer is {}",
+											getSystemName(),
+											rendererId
+										);
 									}
 								} catch (UnknownHostException ex) {
 									LOGGER.debug("" + ex);
@@ -3451,6 +3204,9 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 					};
 
 					new Thread(r, "StopPlaying Event").start();
+				}
+				if (media_subtitle instanceof DLNAMediaOpenSubtitle) {
+					((DLNAMediaOpenSubtitle) media_subtitle).deleteLiveSubtitlesFile();
 				}
 			}
 		};
@@ -3899,33 +3655,84 @@ public abstract class DLNAResource extends HTTPResource implements Cloneable, Ru
 		return getGenericThumbnailInputStream(null);
 	}
 
+	/**
+	 * Adds an audio "flag" filter to the specified
+	 * {@link BufferedImageFilterChain}. If {@code filterChain} is {@code null}
+	 * and a "flag" filter is added, a new {@link BufferedImageFilterChain} is
+	 * created.
+	 *
+	 * @param filterChain the {@link BufferedImageFilterChain} to modify.
+	 * @return The resulting {@link BufferedImageFilterChain} or {@code null}.
+	 */
+	public BufferedImageFilterChain addAudioFlagFilter(BufferedImageFilterChain filterChain) {
+		String audioLanguageCode = media_audio != null ? media_audio.getLang() : null;
+		if (isNotBlank(audioLanguageCode)) {
+			if (filterChain == null) {
+				filterChain = new BufferedImageFilterChain();
+			}
+			filterChain.add(new ImagesUtil.AudioFlagFilter(audioLanguageCode, THUMBNAIL_HINTS));
+		}
+		return filterChain;
+	}
+
+	/**
+	 * Adds a subtitles "flag" filter to the specified
+	 * {@link BufferedImageFilterChain}. If {@code filterChain} is {@code null}
+	 * and a "flag" filter is added, a new {@link BufferedImageFilterChain} is
+	 * created.
+	 *
+	 * @param filterChain the {@link BufferedImageFilterChain} to modify.
+	 * @return The resulting {@link BufferedImageFilterChain} or {@code null}.
+	 */
+	public BufferedImageFilterChain addSubtitlesFlagFilter(BufferedImageFilterChain filterChain) {
+		String subsLanguageCode = media_subtitle != null && media_subtitle.getId() != -1 ? media_subtitle.getLang() : null;
+
+		if (isNotBlank(subsLanguageCode)) {
+			if (filterChain == null) {
+				filterChain = new BufferedImageFilterChain();
+			}
+			filterChain.add(new ImagesUtil.SubtitlesFlagFilter(subsLanguageCode, THUMBNAIL_HINTS));
+		}
+		return filterChain;
+	}
+
+	/**
+	 * Adds audio and subtitles "flag" filters to the specified
+	 * {@link BufferedImageFilterChain} if they should be applied. If
+	 * {@code filterChain} is {@code null} and a "flag" filter is added, a new
+	 * {@link BufferedImageFilterChain} is created.
+	 *
+	 * @param filterChain the {@link BufferedImageFilterChain} to modify.
+	 * @return The resulting {@link BufferedImageFilterChain} or {@code null}.
+	 */
 	public BufferedImageFilterChain addFlagFilters(BufferedImageFilterChain filterChain) {
 		// Show audio and subtitles language flags in the TRANSCODE folder only for video files
-		if (
-			format != null &&
-			format.isVideo() &&
-			parent instanceof FileTranscodeVirtualFolder &&
-			(
+		if ((
+				parent instanceof FileTranscodeVirtualFolder ||
+				parent instanceof SubSelFile
+			) && (
 				media_audio != null ||
 				media_subtitle != null
 			)
 		) {
-			String audioLanguageCode = media_audio != null ? media_audio.getLang() : null;
-			if (isNotBlank(audioLanguageCode)) {
-				if (filterChain == null) {
-					filterChain = new BufferedImageFilterChain();
-				}
-				filterChain.add(new ImagesUtil.AudioFlagFilter(audioLanguageCode, THUMBNAIL_HINTS));
+			if ((
+					media != null &&
+					media.isVideo()
+				) || (
+					media == null &&
+					format != null &&
+					format.isVideo()
+				)
+			) {
+				filterChain = addAudioFlagFilter(filterChain);
+				filterChain = addSubtitlesFlagFilter(filterChain);
 			}
-
-			String subsLanguageCode = media_subtitle != null && media_subtitle.getId() != -1 ? media_subtitle.getLang() : null;
-
-			if (isNotBlank(subsLanguageCode)) {
-				if (filterChain == null) {
-					filterChain = new BufferedImageFilterChain();
-				}
-				filterChain.add(new ImagesUtil.SubtitlesFlagFilter(subsLanguageCode, THUMBNAIL_HINTS));
-			}
+		} else if (
+			parent instanceof TranscodeVirtualFolder &&
+			this instanceof FileTranscodeVirtualFolder &&
+			media_subtitle != null
+		) {
+			filterChain = addSubtitlesFlagFilter(filterChain);
 		}
 		return filterChain;
 	}

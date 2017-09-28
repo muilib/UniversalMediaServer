@@ -30,6 +30,7 @@ import net.pms.configuration.PmsConfiguration;
 import net.pms.configuration.RendererConfiguration;
 import net.pms.dlna.DLNAMediaAudio;
 import net.pms.dlna.DLNAMediaInfo;
+import net.pms.dlna.DLNAMediaOpenSubtitle;
 import net.pms.dlna.DLNAMediaSubtitle;
 import net.pms.dlna.DLNAResource;
 import net.pms.external.ExternalFactory;
@@ -217,9 +218,9 @@ public abstract class Player {
 		if (params.sid != null && params.sid.getId() == -1) {
 			LOGGER.trace("Don't want subtitles!");
 			params.sid = null;
-//		} else if (params.sid instanceof DLNAMediaOpenSubtitle && params.sid.getExternalFile() != null) { //TODO: (Nad) Temp disable
-//			 // Check for live subtitles, the call to getExternalFile() will actually download the subtitle
-//			return;
+		} else if (params.sid instanceof DLNAMediaOpenSubtitle && params.sid.getExternalFile() != null) { //TODO: (Nad) Temp disable
+			 // Check for live subtitles, the call to getExternalFile() will actually download the subtitle
+			return;
 		} else if (params.sid == null) {
 			params.sid = resolveSubtitlesStream(fileName, media, params.mediaRenderer, params.aid == null ? null : params.aid.getLang(), false);
 		}
@@ -304,7 +305,7 @@ public abstract class Player {
 			SubtitleUtils.registerExternalSubtitles(new File(fileName), media, forceRefresh);
 		}
 
-		if (!media.hasSubtitles()) { // There aren't subs for this media so skip checking for languages
+		if (media == null || !media.hasSubtitles()) { // There aren't subs for this media so skip checking for languages
 			return null;
 		}
 
@@ -401,7 +402,7 @@ public abstract class Player {
 		 */
 		if (matchedSub == null && configuration.isForceExternalSubtitles()) {
 			for (DLNAMediaSubtitle present_sub : media.getSubtitleTracksList()) {
-				if (present_sub.getExternalFile() != null) {
+				if (present_sub.isExternal()) {
 					matchedSub = present_sub;
 					LOGGER.trace("Matched external subtitles track that did not match language preferences: {}", matchedSub);
 					break;
@@ -441,7 +442,7 @@ public abstract class Player {
 					} else {
 						LOGGER.trace("Found subtitles track: {}", sub);
 						if (sub.isExternal()) {
-							LOGGER.trace("Found external file: \"{}\"", sub.getExternalFile().getAbsolutePath());
+							LOGGER.trace("Found external file: \"{}\"", sub.getName());
 							matchedSub = sub;
 							break;
 						}
@@ -467,7 +468,7 @@ public abstract class Player {
 							sub.matchCode(lang) &&
 							!(
 								!configuration.isAutoloadExternalSubtitles() &&
-								sub.getExternalFile() != null
+								sub.isExternal()
 							)
 						) {
 							LOGGER.trace("Matched subtitles track: {}", sub);
