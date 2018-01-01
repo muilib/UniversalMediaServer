@@ -65,7 +65,7 @@ public class RealFile extends MapFile {
 			return false;
 		}
 		if (getType() == Format.VIDEO && file.exists() && configuration.isAutoloadExternalSubtitles() && file.getName().length() > 4) {
-			setHasExternalSubtitles(FileUtil.isSubtitlesExists(file, null));
+			setHasExternalSubtitles(FileUtil.isExternalSubtitlesExists(file, null));
 		}
 
 		boolean valid = file.exists() && (getFormat() != null || file.isDirectory());
@@ -209,9 +209,6 @@ public class RealFile extends MapFile {
 
 				if (getFormat() != null) {
 					getFormat().parse(getMedia(), input, getType(), getParent().getDefaultRenderer());
-					if (getMedia() != null && getMedia().isSLS()) {
-						setFormat(getMedia().getAudioVariantFormat());
-					}
 
 					OutputParams params = new OutputParams(configuration);
 					Player.setAudioAndSubs(input.toString(), media, params);
@@ -246,6 +243,9 @@ public class RealFile extends MapFile {
 						}
 					}
 				}
+			}
+			if (getMedia() != null && getMedia().isSLS()) {
+				setFormat(getMedia().getAudioVariantFormat());
 			}
 		}
 	}
